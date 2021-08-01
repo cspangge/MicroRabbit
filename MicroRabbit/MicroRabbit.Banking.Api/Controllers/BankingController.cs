@@ -5,6 +5,8 @@ using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
 using System.Linq;
 using System.Threading.Tasks;
+using HttpResponse;
+using HttpResponse.Models;
 using MicroRabbit.Banking.Application.Interfaces;
 using MicroRabbit.Banking.Application.Models;
 using MicroRabbit.Banking.Domain.Models;
@@ -24,9 +26,9 @@ namespace MicroRabbit.Banking.Api.Controllers
 
         // GET api/v1/banking
         [HttpGet]
-        public ActionResult<IEnumerable<Account>> Get()
+        public Result<IEnumerable<Account>> Get()
         {
-            return Ok(_accountService.GetAccounts());
+            return ResponseResult<IEnumerable<Account>>.Success(_accountService.GetAccounts());
         }
 
         // POST api/v1/banking
