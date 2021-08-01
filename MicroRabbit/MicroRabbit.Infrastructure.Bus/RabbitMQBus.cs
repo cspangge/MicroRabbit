@@ -7,6 +7,7 @@ using MediatR;
 using MicroRabbit.Domain.Core.Bus;
 using MicroRabbit.Domain.Core.Commands;
 using MicroRabbit.Domain.Core.Events;
+using Microsoft.Extensions.DependencyInjection;
 using Newtonsoft.Json;
 using RabbitMQ.Client;
 using RabbitMQ.Client.Events;
@@ -18,13 +19,32 @@ namespace MicroRabbit.Infrastructure.Bus
         private readonly IMediator _mediator;
         private readonly Dictionary<string, List<Type>> _handlers;
         private readonly List<Type> _eventTypes;
+        private readonly IServiceScopeFactory _serviceScopeFactory;
+        private IConnection _connection;
+        private IModel _channel;
 
-        public RabbitMQBus(IMediator mediator)
+        public RabbitMQBus(IMediator mediator, IServiceScopeFactory serviceScopeFactory)
         {
             _mediator = mediator;
+            _serviceScopeFactory = serviceScopeFactory;
             _handlers = new Dictionary<string, List<Type>>();
             _eventTypes = new List<Type>();
         }
+
+        private void InitRabbitMQ()
+        {
+            var factory = new ConnectionFactory()
+            {
+                HostName = "localhost"
+            };
+
+            // create connection  
+            _connection = factory.CreateConnection();
+
+            // create channel  
+            _channel = _connection.CreateModel();
+        }
+
 
         public Task SendCommand<T>(T command) where T : Command
         {
@@ -37,8 +57,8 @@ namespace MicroRabbit.Infrastructure.Bus
             {
                 HostName = "localhost"
             };
-            using var connection = factory.CreateConnection();
-            using var channel = connection.CreateModel();
+            var connection = factory.CreateConnection();
+            var channel = connection.CreateModel();
 
             var eventName = @event.GetType().Name;
             channel.QueueDeclare(eventName, false, false, false, null);
@@ -76,14 +96,15 @@ namespace MicroRabbit.Infrastructure.Bus
 
         private void StartBasicConsume<T>() where T : Event
         {
+            // InitRabbitMQ();
             var factory = new ConnectionFactory()
             {
                 HostName = "localhost",
                 DispatchConsumersAsync = true
             };
-
-            using var connection = factory.CreateConnection();
-            using var channel = connection.CreateModel();
+            
+            var connection = factory.CreateConnection();
+            var channel = connection.CreateModel();
 
             var eventName = typeof(T).Name;
             channel.QueueDeclare(eventName, false, false, false, null);
@@ -106,7 +127,7 @@ namespace MicroRabbit.Infrastructure.Bus
             }
             catch (Exception exception)
             {
-                
+                Console.WriteLine(exception.Message);
             }
         }
 
@@ -114,15 +135,17 @@ namespace MicroRabbit.Infrastructure.Bus
         {
             if (_handlers.ContainsKey(eventName))
             {
+                using var scope = _serviceScopeFactory.CreateScope();
                 var subscriptions = _handlers[eventName];
                 foreach (var subscription in subscriptions)
                 {
-                    var handler = Activator.CreateInstance(subscription);
+                    // var handler = Activator.CreateInstance(subscription);
+                    var handler = scope.ServiceProvider.GetService(subscription);
                     if (handler == null) continue;
                     var eventType = _eventTypes.SingleOrDefault(t => t.Name == eventName);
                     var @event = JsonConvert.DeserializeObject(message, eventType);
                     var concreteType = typeof(IEventHandler<>).MakeGenericType(eventType);
-                    await (Task) concreteType.GetMethod("Handler").Invoke(handler, new object[] { @event });
+                    await (Task) concreteType.GetMethod("Handle").Invoke(handler, new object[] { @event });
                 }
             }
         }
